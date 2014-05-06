@@ -90,7 +90,7 @@
 
 (provide :loop)
 
-#-(and allegro (version>= 9 1))
+#+(and allegro (not (version>= 9 1)))
 (defmacro note-equivalent-forms (arg1 arg2)
   (declare (ignore arg1 arg2))
   nil)
@@ -1573,6 +1573,7 @@ collected result will be returned as the value of the LOOP."
 	(push `(with-loop-list-collection-head ,tempvars) *loop-wrappers*)
 	(unless (loop-collector-name lc)
 	  (let ((form `(loop-collect-answer ,(car tempvars) ,@(cddr tempvars))))
+	    #+allegro
 	    (note-equivalent-forms form (car *loop-source-context*))
 	    (loop-emit-final-value form))))
       (ecase specifically
@@ -1721,6 +1722,7 @@ collected result will be returned as the value of the LOOP."
 				       (loop-make-psetq steps)
 				       (make-endtest pre-step-tests)
 				       *loop-after-body*))
+	#+allegro
 	(when *loop-src-end-form*
 	  (when (second *loop-before-loop*)
 	    (note-equivalent-forms (second *loop-before-loop*) *loop-src-end-form*))
@@ -2190,6 +2192,7 @@ collected result will be returned as the value of the LOOP."
 	  (loop-make-iteration-variable indexv form indexv-type)
 	  (unless *loop-src-step-prep*
 	    (setq *loop-src-step-prep* orig-prep))
+	  #+allegro
 	  (note-equivalent-forms (car *loop-variables*) orig-prep))
 	 ((:upto :to :downto :above :below)
 	  (cond ((loop-tequal prep :upto) (setq inclusive-iteration (setq dir ':up)))
@@ -2243,6 +2246,7 @@ collected result will be returned as the value of the LOOP."
 		(setq endform (loop-typed-init indexv-type) inclusive-iteration t))
 	      (when endform (setq testfn (if inclusive-iteration  '< '<=)))
 	      (setq step (if (eql stepby 1) `(1- ,indexv) `(- ,indexv ,stepby)))))
+     #+allegro
      (note-equivalent-forms step (or *loop-src-step-prep* *loop-src-end-prep*))
      (when testfn (setq test (hide-variable-reference t indexv `(,testfn ,indexv ,endform))))
      (when step-hack
