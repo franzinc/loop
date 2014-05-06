@@ -90,6 +90,11 @@
 
 (provide :loop)
 
+#-(and allegro (version>= 9 1))
+(defmacro note-equivalent-forms (arg1 arg2)
+  (declare (ignore arg1 arg2))
+  nil)
+
 ;; [rfe6329]
 #+(and allegro process-autoloads)
 (autoload-from "code/misc.cl"
