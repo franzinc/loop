@@ -1888,7 +1888,9 @@ collected result will be returned as the value of the LOOP."
     (multiple-value-bind (sequence-form constantp sequence-value)
 	(loop-constant-fold-if-possible val)
       (loop-make-variable sequence-var sequence-form nil)
-      (loop-make-variable index-var -1 'adim)
+      (loop-make-variable index-var ;; bug22470: fix init and declaration
+			  (if constantp 0 -1)
+			  (when (and constantp (not (consp sequence-value))) 'fixnum))
       (let* ((length 0)
 	     (length-form
 	      (cond ((not constantp)
@@ -1919,6 +1921,8 @@ collected result will be returned as the value of the LOOP."
 					((consp sequence-value) `(pop ,sequence-var))
 					(t `(1+ ,index-var))))))
 	(declare (fixnum length))
+	(when (and constantp (consp sequence-value))
+	  (push `(ignorable ,index-var) *loop-declarations*)) ;bug22470
 	(when (symbolp var) (push `(ignorable ,var) *loop-declarations*))
 	(when constantp
 	  (setq first-test (= length 0))
