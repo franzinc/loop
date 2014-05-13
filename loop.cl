@@ -67,14 +67,16 @@
 ;;;      +1-510-452-2000
 
 #+(and allegro (version= 8 2))
-(sys:defpatch "loop" 1
-  "v1: Fix type inferencing for do-repeat loops."
+(sys:defpatch "loop" 2
+  "v1: Fix type inferencing for do-repeat loops.
+v2: Add for-as-in-sequence subclause (see implementation.htm)."
   :type :system
   :post-loadable t)
 
 #+(and allegro (version= 9 0))
-(sys:defpatch "loop" 1
-  "v1: Remove the need for the compiler when loop module is loaded."
+(sys:defpatch "loop" 2
+  "v1: Remove the need for the compiler when loop module is loaded.
+v2: Add for-as-in-sequence subclause (see implementation.htm)."
   :type :system
   :post-loadable t)
 
