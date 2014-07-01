@@ -1288,10 +1288,13 @@ collected result will be returned as the value of the LOOP."
 	0))
   #+allegro
   (with-normal-consing
-      (when (and data-type (subtypep data-type 'number))
-	(if (or (subtypep data-type 'float) (subtypep data-type '(complex float)))
-	    (coerce 0 data-type)
-	  0))))
+      (cond ((and data-type (subtypep data-type 'number))
+	     (if (or (subtypep data-type 'float) (subtypep data-type '(complex float)))
+		 (coerce 0 data-type)
+	       0))
+	    ;; [bug22148]
+	    ((and data-type (subtypep data-type 'character))
+	     #\null))))
 
 
 (defun loop-optional-type (&optional variable)
@@ -1892,7 +1895,10 @@ collected result will be returned as the value of the LOOP."
       (loop-make-variable sequence-var sequence-form nil)
       (loop-make-variable index-var ;; bug22470: fix init and declaration
 			  (if constantp 0 -1)
-			  (when (and constantp (not (consp sequence-value))) 'fixnum))
+			  ;; [rfe13107]: Fix index declaration
+			  (if (and constantp (not (consp sequence-value)))
+			      'adim
+			    'fixnum))
       (let* ((length 0)
 	     (length-form
 	      (cond ((not constantp)
