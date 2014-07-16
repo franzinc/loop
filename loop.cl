@@ -660,16 +660,18 @@ a LET-like macro, and a SETQ-like macro, which perform LOOP-style destructuring.
 							  (setq ,temp (cdr ,temp))
 							  ,@(loop-desetq-internal cdr temp temp))))
 			   (if temp-p
-			       `(,@(unless (eq temp val)
+			       `(,@(if (eq temp val) ; [bug16933]
+				       `((progn))
 				     `((setq ,temp ,val)))
-				 ,@body)
-			       `((let ((,temp ,val))
-				   ,@body))))
-			 ;; no cdring to do
-			 (loop-desetq-internal car `(car ,val) temp)))))
+				   ,@body)
+			     `((let ((,temp ,val))
+				 ,@body))))
+		       ;; no cdring to do
+		       (loop-desetq-internal car `(car ,val) temp)))))
 	       (otherwise
-		 (unless (eq var val)
-		   `((setq ,var ,val)))))))
+		(if (eq var val)	; [bug16933]
+		    `((progn))
+		  `((setq ,var ,val)))))))
     (do ((actions))
 	((null var-val-pairs)
 	 (if (null (cdr actions)) (car actions) `(progn ,@(nreverse actions))))
@@ -710,6 +712,10 @@ a LET-like macro, and a SETQ-like macro, which perform LOOP-style destructuring.
 ;;;List of declarations being accumulated in parallel with
 ;;;*loop-variables*.
 (defvar *loop-declarations*)
+
+;;;List of declarations being accumulated for use in a
+;; locally form.
+(defvar *loop-locally-declarations*)
 
 ;;;Used by LOOP for destructuring binding, if it is doing that itself.
 ;;; See loop-make-variable.
@@ -1139,6 +1145,7 @@ collected result will be returned as the value of the LOOP."
 	(*loop-nodeclare* nil)
 	(*loop-named-variables* nil)
 	(*loop-declarations* nil)
+	(*loop-locally-declarations* nil)
 	(*loop-desetq-crocks* nil)
 	(*loop-bind-stack* nil)
 	(*loop-prologue* nil)
@@ -1166,10 +1173,13 @@ collected result will be returned as the value of the LOOP."
       (dolist (entry *loop-bind-stack*)
 	(let ((vars (first entry))
 	      (dcls (second entry))
-	      (crocks (third entry))
-	      (wrappers (fourth entry)))
+	      (loc-dcls (third entry))
+	      (crocks (fourth entry))
+	      (wrappers (fifth entry)))
 	  (dolist (w wrappers)
 	    (setq answer (append w (list answer))))
+	  (when loc-dcls
+	    (setq answer (append `(locally (declare ,@loc-dcls)) (list answer))))
 	  (when (or vars dcls crocks)
 	    (let ((forms (list answer)))
 	      ;;(when crocks (push crocks forms))
@@ -1354,11 +1364,12 @@ collected result will be returned as the value of the LOOP."
 
 
 (defun loop-bind-block ()
-  (when (or *loop-variables* *loop-declarations* *loop-wrappers*)
-    (push (list (nreverse *loop-variables*) *loop-declarations* *loop-desetq-crocks* *loop-wrappers*)
+  (when (or *loop-variables* *loop-declarations* *loop-locally-declarations* *loop-wrappers*)
+    (push (list (nreverse *loop-variables*) *loop-declarations* *loop-locally-declarations* *loop-desetq-crocks* *loop-wrappers*)
 	  *loop-bind-stack*)
     (setq *loop-variables* nil
 	  *loop-declarations* nil
+	  *loop-locally-declarations* nil
 	  *loop-desetq-crocks* nil
 	  *loop-wrappers* nil)))
 
@@ -1369,7 +1380,30 @@ collected result will be returned as the value of the LOOP."
 	  ((assoc name (caar entry) :test #'eq)
 	   (return t)))))
 
-(defun loop-make-variable (name initialization dtype &optional iteration-variable-p)
+(defvar *do-locally-declare* nil)
+
+(defun loop-declare-variable (name init dtype)
+  (cond ((or (null name) (null dtype) (eq dtype t)) nil)
+	((symbolp name)
+	 (unless (or (eq dtype t) (member (the symbol name) *loop-nodeclare*))
+	   (let ((dtype #-cmu dtype
+			#+cmu
+			(let ((init (loop-typed-init dtype)))
+			  (if (typep init dtype)
+			      dtype
+			      `(or (member ,init) ,dtype)))))
+	     (if (and dtype (symbolp init) *do-locally-declare*)
+		 (push `(type ,dtype ,name) *loop-locally-declarations*)
+	       (push `(type ,dtype ,name) *loop-declarations*)))))
+	((consp name)
+	 (cond ((consp dtype)
+		(loop-declare-variable (car name) nil (car dtype))
+		(loop-declare-variable (cdr name) nil (cdr dtype)))
+	       (t (loop-declare-variable (car name) nil dtype)
+		  (loop-declare-variable (cdr name) nil dtype))))
+	(t (excl::.error "Invalid LOOP variable passed in: ~S." name))))
+
+(defun loop-make-variable (name initialization dtype &optional iteration-variable-p) 
   (cond ((null name)
 	 (cond ((not (null initialization))
 		(push (list (setq name (loop-gentemp 'loop-ignore-))
@@ -1385,17 +1419,18 @@ collected result will be returned as the value of the LOOP."
 		(loop-error "Duplicated variable ~S in LOOP parallel binding." name)))
 	 (unless (symbolp name)
 	   (loop-error "Bad variable ~S somewhere in LOOP." name))
-	 (loop-declare-variable name dtype)
-	 ;; We use ASSOC on this list to check for duplications (above),
-	 ;; so don't optimize out this list:
-	 (push (list name (or initialization (loop-typed-init dtype)))
-	       *loop-variables*))
+	 (let ((init (or initialization (loop-typed-init dtype))))
+	   (loop-declare-variable name init dtype)
+	   ;; We use ASSOC on this list to check for duplications (above),
+	   ;; so don't optimize out this list:
+	   (push (list name init)
+		 *loop-variables*)))
 	(initialization
 	 (cond (*loop-destructuring-hooks*
-		(loop-declare-variable name dtype)
+		(loop-declare-variable name nil dtype)
 		(push (list name initialization) *loop-variables*))
 	       (t (let ((newvar (loop-gentemp 'loop-destructure-)))
-		    (loop-declare-variable name dtype)
+		    (loop-declare-variable name nil dtype)
 		    (push (list newvar initialization) *loop-variables*)
 		    ;; *LOOP-DESETQ-CROCKS* gathered in reverse order.
 		    (setq *loop-desetq-crocks*
@@ -1412,26 +1447,6 @@ collected result will be returned as the value of the LOOP."
 
 (defun loop-make-iteration-variable (name initialization dtype)
   (loop-make-variable name initialization dtype t))
-
-
-(defun loop-declare-variable (name dtype)
-  (cond ((or (null name) (null dtype) (eq dtype t)) nil)
-	((symbolp name)
-	 (unless (or (eq dtype t) (member (the symbol name) *loop-nodeclare*))
-	   (let ((dtype #-cmu dtype
-			#+cmu
-			(let ((init (loop-typed-init dtype)))
-			  (if (typep init dtype)
-			      dtype
-			      `(or (member ,init) ,dtype)))))
-	     (push `(type ,dtype ,name) *loop-declarations*))))
-	((consp name)
-	 (cond ((consp dtype)
-		(loop-declare-variable (car name) (car dtype))
-		(loop-declare-variable (cdr name) (cdr dtype)))
-	       (t (loop-declare-variable (car name) dtype)
-		  (loop-declare-variable (cdr name) dtype))))
-	(t (excl::.error "Invalid LOOP variable passed in: ~S." name))))
 
 
 (defun loop-maybe-bind-form (form data-type)
