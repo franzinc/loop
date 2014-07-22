@@ -67,16 +67,18 @@
 ;;;      +1-510-452-2000
 
 #+(and allegro (version= 8 2))
-(sys:defpatch "loop" 2
+(sys:defpatch "loop" 3
   "v1: Fix type inferencing for do-repeat loops.
-v2: Add for-as-in-sequence subclause (see implementation.htm)."
+v2: Add for-as-in-sequence subclause (see implementation.htm).
+v3: Fix runtime type warnings in high-safety compilations."
   :type :system
   :post-loadable t)
 
 #+(and allegro (version= 9 0))
-(sys:defpatch "loop" 2
+(sys:defpatch "loop" 3
   "v1: Remove the need for the compiler when loop module is loaded.
-v2: Add for-as-in-sequence subclause (see implementation.htm)."
+v2: Add for-as-in-sequence subclause (see implementation.htm).
+v3: Fix runtime type warnings in high-safety compilations."
   :type :system
   :post-loadable t)
 
@@ -1380,7 +1382,7 @@ collected result will be returned as the value of the LOOP."
 	  ((assoc name (caar entry) :test #'eq)
 	   (return t)))))
 
-(defvar *do-locally-declare* nil)
+(defvar *do-locally-declare* t)
 
 (defun loop-declare-variable (name init dtype)
   (cond ((or (null name) (null dtype) (eq dtype t)) nil)
