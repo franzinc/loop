@@ -17,6 +17,12 @@ v3: Fix runtime type warnings in high-safety compilations."
   :type :system
   :post-loadable t)
 
+#+(and allegro (version= 10 0))
+(sys:defpatch "loop" 1
+  "v1: Fix collect form equivalency and add other keyword equivalencies."
+  :type :system
+  :post-loadable t)
+
 ;;;; LOOP Iteration Macro
 
 #+allegro
@@ -1529,16 +1535,16 @@ collected result will be returned as the value of the LOOP."
 					 (list (loop-collector-name lc))))))
 	(push `(with-loop-list-collection-head ,tempvars) *loop-wrappers*)
 	(unless (loop-collector-name lc)
-	  (let ((form `(loop-collect-answer ,(car tempvars) ,@(cddr tempvars))))
-	    #+allegro
-	    (note-equivalent-forms form (car *loop-source-context*))
-	    (loop-emit-final-value form))))
+	  (loop-emit-final-value `(loop-collect-answer ,(car tempvars) ,@(cddr tempvars)))))
       (ecase specifically
 	(list (setq form `(list ,form)))
 	(nconc nil)
 	(append (unless (and (consp form) (eq (car form) 'list))
 		  (setq form `(loop-copylist* ,form)))))
-      (loop-emit-body `(loop-collect-rplacd ,tempvars ,form)))))
+      (let ((form `(loop-collect-rplacd ,tempvars ,form)))
+	#+allegro
+	(note-equivalent-forms form (car *loop-source-context*))
+	(loop-emit-body form)))))
 
 
 ;;;; Value Accumulation: max, min, sum, count.
@@ -1681,10 +1687,10 @@ collected result will be returned as the value of the LOOP."
 				       *loop-after-body*))
 	#+allegro
 	(when *loop-src-end-form*
-	  (when (second *loop-before-loop*)
-	    (note-equivalent-forms (second *loop-before-loop*) *loop-src-end-form*))
-	  (when (second *loop-after-body*)
-	    (note-equivalent-forms (second *loop-after-body*) *loop-src-end-form*)))
+	  (when (first *loop-before-loop*)
+	    (note-equivalent-forms (first *loop-before-loop*) *loop-src-end-form*))
+	  (when (first *loop-after-body*)
+	    (note-equivalent-forms (first *loop-after-body*) *loop-src-end-form*)))
 	(loop-bind-block)
 	(return nil))
       
@@ -1788,7 +1794,7 @@ collected result will be returned as the value of the LOOP."
 
 
 (defun loop-for-across (var val data-type orig-kwd)
-  (declare (ignore orig-kwd))
+  (declare (ignorable orig-kwd))
   (loop-make-iteration-variable var nil data-type)
   (let ((vector-var (loop-gentemp 'loop-across-vector-))
 	(index-var (loop-gentemp 'loop-across-index-)))
@@ -1824,10 +1830,13 @@ collected result will be returned as the value of the LOOP."
 				(t (setq length (length vector-value)))))
 	     (first-test `(>= ,index-var ,length-form))
 	     (other-test first-test)
-	     (step `(,var (aref ,vector-var ,index-var)))
+	     (access `(aref ,vector-var ,index-var))
+	     (step `(,var ,access))
 	     (pstep `(,index-var (1+ ,index-var))))
 	(declare (fixnum length))
 	(when (symbolp var) (push `(ignorable ,var) *loop-declarations*))
+	#+allegro
+	(note-equivalent-forms access orig-kwd)
 	(when constantp
 	  (setq first-test (= length 0))
 	  (when (<= length 1)
@@ -1838,7 +1847,7 @@ collected result will be returned as the value of the LOOP."
 
 ;; [rfe12720]
 (defun loop-for-in-sequence (var val data-type orig-kwd)
-  (declare (ignore orig-kwd))
+  (declare (ignorable orig-kwd))
   (loop-make-iteration-variable var nil data-type)
   (let ((sequence-var (loop-gentemp 'loop-in-sequence-sequence-))
 	(index-var (loop-gentemp 'loop-in-sequence-index-)))
@@ -1868,12 +1877,13 @@ collected result will be returned as the value of the LOOP."
 			       ((consp sequence-value) `(null ,sequence-var))
 			       (t `(>= ,index-var ,length-form))))
 	     (other-test first-test)
-	     (step `(,var ,(cond ((not constantp)
-				  `(if (eq ,index-var -1)
-				       (car ,sequence-var)
-				     (svref ,sequence-var ,index-var)))
-				 ((consp sequence-value) `(car ,sequence-var))
-				 (t `(svref ,sequence-var ,index-var)))))
+	     (access (cond ((not constantp)
+			    `(if (eq ,index-var -1)
+				 (car ,sequence-var)
+			       (svref ,sequence-var ,index-var)))
+			   ((consp sequence-value) `(car ,sequence-var))
+			   (t `(svref ,sequence-var ,index-var))))
+	     (step `(,var ,access))
 	     (pstep `(,index-var ,(cond ((not constantp)
 					 `(if (eq ,index-var -1)
 					      (progn (pop ,sequence-var) -1)
@@ -1884,6 +1894,8 @@ collected result will be returned as the value of the LOOP."
 	(when (and constantp (consp sequence-value))
 	  (push `(ignorable ,index-var) *loop-declarations*)) ;bug22470
 	(when (symbolp var) (push `(ignorable ,var) *loop-declarations*))
+	#+allegro
+	(note-equivalent-forms access orig-kwd)
 	(when constantp
 	  (setq first-test (= length 0))
 	  (when (<= length 1)
@@ -1957,7 +1969,7 @@ collected result will be returned as the value of the LOOP."
 
 
 (defun loop-for-in (var val data-type orig-kwd)
-  (declare (ignore orig-kwd))
+  (declare (ignorable orig-kwd))
   (multiple-value-bind (list constantp list-value) (loop-constant-fold-if-possible val)
     (let ((listvar (loop-gentemp 'loop-list-)))
       (loop-make-iteration-variable var nil data-type)
@@ -1966,13 +1978,16 @@ collected result will be returned as the value of the LOOP."
 	#-LOOP-Prefer-POP (declare (ignore step-function))
 	(let* ((first-endtest `(endp ,listvar))
 	       (other-endtest first-endtest)
-	       (step `(,var (car ,listvar)))
+	       (access `(car ,listvar))
+	       (step `(,var ,access))
 	       (pseudo-step `(,listvar ,list-step)))
 	  (when (and constantp (listp list-value))
 	    (setq first-endtest (null list-value)))
 	  #+LOOP-Prefer-POP (when (eq step-function 'cdr)
 			      (setq step `(,var (pop ,listvar)) pseudo-step nil))
 	  (when (symbolp var) (push `(ignorable ,var) *loop-declarations*))
+	  #+allegro
+	  (note-equivalent-forms access orig-kwd)
 	  `(,other-endtest ,step () ,pseudo-step
 	    ,@(and (not (eq first-endtest other-endtest))
 		   `(,first-endtest ,step () ,pseudo-step))))))))
@@ -2211,7 +2226,7 @@ collected result will be returned as the value of the LOOP."
 	      (when endform (setq testfn (if inclusive-iteration  '< '<=)))
 	      (setq step (if (eql stepby 1) `(1- ,indexv) `(- ,indexv ,stepby)))))
      #+allegro
-     (note-equivalent-forms step (or *loop-src-step-prep* *loop-src-end-prep*))
+     (note-equivalent-forms step (or *loop-src-end-prep* *loop-src-step-prep*))
      (when testfn (setq test (hide-variable-reference t indexv `(,testfn ,indexv ,endform))))
      (when step-hack
        (setq step-hack `(,variable ,(hide-variable-reference indexv-user-specified-p indexv step-hack))))
