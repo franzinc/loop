@@ -1743,7 +1743,8 @@ collected result will be returned as the value of the LOOP."
 		      (declare (ignore valcell))
 		      (unless (and (eq kind :lexical)
 				   type
-				   (setq type (assoc 'type type))
+				   (setq type (or (assoc 'type type)
+						  (assoc 'trusted-type type)))
 				   (setq type (cadr type))
 				   (subtypep type 'real))
 			(setq type 'real))
@@ -1814,7 +1815,8 @@ collected result will be returned as the value of the LOOP."
 		(declare (ignore valcell))
 		(unless (and (eq kind :lexical)
 			     type
-			     (setq type (assoc 'type type))
+			     (setq type (or (assoc 'type type)
+					    (assoc 'trusted-type type)))
 			     (setq type (cadr type))
 			     (subtypep type 'vector))
 		  (setq type 'vector))
