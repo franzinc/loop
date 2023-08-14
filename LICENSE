@@ -1,4 +1,4 @@
-;;; Copyright (c) 1989-2016 Franz Inc, Oakland, CA
+;;; Copyright (c) Franz Inc, Lafayette, CA
 ;;; All rights reserved.
 ;;; 
 ;;; Permission to use, copy, modify and distribute this software and its
@@ -12,12 +12,6 @@
 ;;; Franz  Franz makes no representations about the suitability of this
 ;;; software for any purpose. It is provided "as is" without express or
 ;;; implied warranty.
-;;; 
-;;;      Franz Inc.
-;;;      2201 Broadway Suite 715
-;;;      Oakland, CA 94612
-;;;      United States of America
-;;;      +1-510-452-2000
 
 ;;;>
 ;;;> Copyright (c) 1986 by the Massachusetts Institute of Technology.
